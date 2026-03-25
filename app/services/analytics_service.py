@@ -1,10 +1,9 @@
+import uuid
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models.post import ScheduledPost, PostStatus, Platform
 from app.models.analytics import EngagementMetric
-from app.services.instagram_service import instagram_service
-from app.services.youtube_service import youtube_service
 from app.utils.time_optimizer import calculate_optimal_times
 from app.utils.logger import logger
 
@@ -15,14 +14,25 @@ class AnalyticsService:
         if not post or not post.platform_post_id:
             raise ValueError(f"Post {post_id} not found or not published")
 
+        from app.oauth.token_manager import get_platform_credentials
+
         metrics = {}
         if post.platform == Platform.INSTAGRAM:
-            metrics = await instagram_service.get_media_insights(post.platform_post_id)
+            creds = get_platform_credentials(post.user_id, "instagram", db)
+            if creds:
+                from app.services.instagram_service import InstagramService
+                svc = InstagramService(access_token=creds["access_token"], account_id=creds["platform_user_id"])
+                metrics = await svc.get_media_insights(post.platform_post_id)
         elif post.platform == Platform.YOUTUBE:
-            metrics = youtube_service.get_video_statistics(post.platform_post_id)
+            creds = get_platform_credentials(post.user_id, "youtube", db)
+            if creds:
+                from app.services.youtube_service import YouTubeService
+                svc = YouTubeService(credentials=creds)
+                metrics = svc.get_video_statistics(post.platform_post_id)
 
         for name, value in metrics.items():
             metric = EngagementMetric(
+                user_id=post.user_id,
                 post_id=post_id,
                 platform=post.platform.value,
                 metric_name=name,
@@ -34,17 +44,20 @@ class AnalyticsService:
         logger.info(f"Synced analytics for post {post_id}: {len(metrics)} metrics")
         return metrics
 
-    async def sync_all_recent_posts(self, db: Session) -> int:
+    async def sync_all_recent_posts(self, db: Session, user_id: uuid.UUID | None = None) -> int:
         cutoff = datetime.utcnow() - timedelta(days=30)
-        posts = (
+        query = (
             db.query(ScheduledPost)
             .filter(
                 ScheduledPost.status == PostStatus.PUBLISHED,
                 ScheduledPost.scheduled_time >= cutoff,
                 ScheduledPost.platform_post_id.isnot(None),
             )
-            .all()
         )
+        if user_id:
+            query = query.filter(ScheduledPost.user_id == user_id)
+
+        posts = query.all()
 
         synced = 0
         for post in posts:
@@ -56,39 +69,38 @@ class AnalyticsService:
 
         return synced
 
-    def get_post_analytics(self, post_id: int, db: Session) -> list[EngagementMetric]:
-        return (
-            db.query(EngagementMetric)
-            .filter(EngagementMetric.post_id == post_id)
-            .order_by(EngagementMetric.recorded_at.desc())
-            .all()
-        )
+    def get_post_analytics(self, post_id: int, db: Session, user_id: uuid.UUID | None = None) -> list[EngagementMetric]:
+        query = db.query(EngagementMetric).filter(EngagementMetric.post_id == post_id)
+        if user_id:
+            query = query.filter(EngagementMetric.user_id == user_id)
+        return query.order_by(EngagementMetric.recorded_at.desc()).all()
 
     def get_platform_overview(
-        self, platform: str, days: int, db: Session
+        self, platform: str, days: int, db: Session, user_id: uuid.UUID | None = None
     ) -> dict:
         cutoff = datetime.utcnow() - timedelta(days=days)
 
-        total_posts = (
-            db.query(ScheduledPost)
-            .filter(
-                ScheduledPost.platform == platform,
-                ScheduledPost.status == PostStatus.PUBLISHED,
-                ScheduledPost.scheduled_time >= cutoff,
-            )
-            .count()
+        post_query = db.query(ScheduledPost).filter(
+            ScheduledPost.platform == platform,
+            ScheduledPost.status == PostStatus.PUBLISHED,
+            ScheduledPost.scheduled_time >= cutoff,
         )
+        if user_id:
+            post_query = post_query.filter(ScheduledPost.user_id == user_id)
+        total_posts = post_query.count()
 
         def _sum_metric(name: str) -> float:
-            result = (
+            q = (
                 db.query(func.sum(EngagementMetric.metric_value))
                 .filter(
                     EngagementMetric.platform == platform,
                     EngagementMetric.metric_name == name,
                     EngagementMetric.recorded_at >= cutoff,
                 )
-                .scalar()
             )
+            if user_id:
+                q = q.filter(EngagementMetric.user_id == user_id)
+            result = q.scalar()
             return float(result or 0)
 
         impressions = _sum_metric("impressions")
@@ -112,8 +124,8 @@ class AnalyticsService:
             "period_days": days,
         }
 
-    def get_optimal_times(self, platform: str, db: Session) -> list[dict]:
-        metrics = (
+    def get_optimal_times(self, platform: str, db: Session, user_id: uuid.UUID | None = None) -> list[dict]:
+        query = (
             db.query(
                 ScheduledPost.scheduled_time,
                 func.sum(EngagementMetric.metric_value).label("total_engagement"),
@@ -124,9 +136,11 @@ class AnalyticsService:
                 ScheduledPost.status == PostStatus.PUBLISHED,
                 EngagementMetric.metric_name.in_(["likes", "comments", "shares", "saves"]),
             )
-            .group_by(ScheduledPost.id)
-            .all()
         )
+        if user_id:
+            query = query.filter(ScheduledPost.user_id == user_id)
+
+        metrics = query.group_by(ScheduledPost.id).all()
 
         engagement_data = [
             {
@@ -139,9 +153,9 @@ class AnalyticsService:
         return calculate_optimal_times(engagement_data)
 
     def get_top_posts(
-        self, platform: str, db: Session, limit: int = 10
+        self, platform: str, db: Session, limit: int = 10, user_id: uuid.UUID | None = None
     ) -> list[dict]:
-        results = (
+        query = (
             db.query(
                 ScheduledPost.id,
                 ScheduledPost.content_text,
@@ -154,7 +168,12 @@ class AnalyticsService:
                 ScheduledPost.platform == platform,
                 EngagementMetric.metric_name.in_(["likes", "comments", "shares", "saves", "views"]),
             )
-            .group_by(ScheduledPost.id)
+        )
+        if user_id:
+            query = query.filter(ScheduledPost.user_id == user_id)
+
+        results = (
+            query.group_by(ScheduledPost.id)
             .order_by(func.sum(EngagementMetric.metric_value).desc())
             .limit(limit)
             .all()
