@@ -5,6 +5,7 @@ from app.oauth.models import ConnectedAccount, OAuthState
 from app.oauth.token_manager import decrypt_token, encrypt_token
 from app.config import settings
 from app.utils.logger import logger
+from app import telemetry
 import httpx
 
 
@@ -38,7 +39,11 @@ def refresh_expiring_tokens():
                     _refresh_meta_token(account, db)
                     refreshed += 1
                 # LinkedIn doesn't support refresh tokens in this flow
+                else:
+                    continue
+                telemetry.token_refreshes.add(1, {"platform": account.platform, "status": "success"})
             except Exception as e:
+                telemetry.token_refreshes.add(1, {"platform": account.platform, "status": "error"})
                 logger.error(f"Failed to refresh token for account {account.id}: {e}")
 
         logger.info(f"Refreshed {refreshed} tokens")

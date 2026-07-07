@@ -59,6 +59,20 @@ class Settings(BaseSettings):
 
     # Logging
     LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "text"  # "text" for local dev, "json" for structured logs (Cloud Run)
+
+    # Telemetry (OpenTelemetry / OTLP)
+    ENVIRONMENT: str = "development"  # dev / staging / production — becomes deployment.environment
+    OTEL_ENABLED: bool = False
+    OTEL_SERVICE_NAME: str = "social-media-backend"
+    # OTLP collector endpoint, e.g. "http://localhost:4318" (http) or "localhost:4317" (grpc).
+    # Leave blank to use the SDK default for the selected protocol.
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = ""
+    OTEL_EXPORTER_OTLP_PROTOCOL: str = "http/protobuf"  # "http/protobuf" or "grpc"
+    # Comma-separated header list, e.g. "authorization=Bearer xxx,x-tenant=abc"
+    OTEL_EXPORTER_OTLP_HEADERS: str = ""
+    OTEL_TRACES_SAMPLER_RATIO: float = 1.0  # 0.0–1.0 (parent-based ratio sampler)
+    OTEL_EXPORT_LOGS: bool = True  # also ship application logs via OTLP
 
     # Plan Limits
     FREE_PLAN_MAX_ACCOUNTS: int = 2

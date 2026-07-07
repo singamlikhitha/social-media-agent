@@ -8,6 +8,8 @@ from google.genai import types
 
 from app.config import settings
 from app.utils.logger import logger
+from app import telemetry
+import time
 
 UPLOAD_DIR = Path("uploads")
 
@@ -16,6 +18,35 @@ class GeminiService:
     def __init__(self):
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
         self.model = settings.GEMINI_MODEL
+
+    def _run_model(self, operation: str, prompt: str, response_schema: dict):
+        """Run a structured-JSON Gemini generation with tracing + metrics."""
+        attrs = {"operation": operation, "model": self.model}
+        with telemetry.tracer.start_as_current_span(f"gemini.{operation}") as span:
+            span.set_attribute("gemini.model", self.model)
+            span.set_attribute("gemini.operation", operation)
+            started = time.monotonic()
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config={
+                        "response_mime_type": "application/json",
+                        "response_schema": response_schema,
+                    },
+                )
+                telemetry.gemini_requests.add(1, {**attrs, "status": "success"})
+                return json.loads(response.text)
+            except Exception as e:
+                span.record_exception(e)
+                span.set_attribute("error", True)
+                telemetry.gemini_requests.add(1, {**attrs, "status": "error"})
+                logger.error(f"Gemini {operation} failed: {e}")
+                raise
+            finally:
+                telemetry.gemini_duration.record(
+                    (time.monotonic() - started) * 1000, attrs
+                )
 
     async def generate_content_ideas(
         self, platform: str, niche: str, count: int = 5
@@ -47,19 +78,7 @@ Focus on trending topics, seasonal relevance, and high-engagement formats."""
             },
         }
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": response_schema,
-                },
-            )
-            return json.loads(response.text)
-        except Exception as e:
-            logger.error(f"Gemini content generation failed: {e}")
-            raise
+        return self._run_model("generate_content_ideas", prompt, response_schema)
 
     async def analyze_trends(self, niche: str) -> list[dict]:
         prompt = f"""Analyze current trending topics in the "{niche}" niche for social media.
@@ -86,19 +105,7 @@ For each trend provide:
             },
         }
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": response_schema,
-                },
-            )
-            return json.loads(response.text)
-        except Exception as e:
-            logger.error(f"Gemini trend analysis failed: {e}")
-            raise
+        return self._run_model("analyze_trends", prompt, response_schema)
 
     async def repurpose_content(
         self, source_platform: str, target_platform: str, content: str
@@ -136,19 +143,7 @@ Provide:
             "required": ["adapted_content", "suggested_hashtags", "notes"],
         }
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": response_schema,
-                },
-            )
-            return json.loads(response.text)
-        except Exception as e:
-            logger.error(f"Gemini content repurposing failed: {e}")
-            raise
+        return self._run_model("repurpose_content", prompt, response_schema)
 
     async def optimize_caption(self, platform: str, draft_caption: str) -> dict:
         prompt = f"""You are a social media copywriting expert.
@@ -172,19 +167,7 @@ Provide:
             "required": ["optimized", "improvements"],
         }
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": response_schema,
-                },
-            )
-            return json.loads(response.text)
-        except Exception as e:
-            logger.error(f"Gemini caption optimization failed: {e}")
-            raise
+        return self._run_model("optimize_caption", prompt, response_schema)
 
     async def suggest_hashtags(
         self, platform: str, content: str, count: int = 20
@@ -216,19 +199,7 @@ Provide:
             "required": ["hashtags", "reasoning"],
         }
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": response_schema,
-                },
-            )
-            return json.loads(response.text)
-        except Exception as e:
-            logger.error(f"Gemini hashtag suggestion failed: {e}")
-            raise
+        return self._run_model("suggest_hashtags", prompt, response_schema)
 
     async def generate_image(self, prompt: str, user_id: int, style: str | None = None) -> dict:
         """Generate an image using Together.ai, Pollinations.ai, or Unsplash fallback."""
@@ -317,11 +288,13 @@ Provide:
                 logger.warning(f"LoremFlickr fallback error: {e}")
 
         if not image_bytes:
+            telemetry.media_generated.add(1, {"kind": "image", "source": "none", "status": "failed"})
             raise ValueError(
                 "Image generation is temporarily unavailable. "
                 "For reliable AI image generation, add TOGETHER_API_KEY to .env "
                 "(get one free at https://api.together.xyz)"
             )
+        telemetry.media_generated.add(1, {"kind": "image", "source": source or "unknown", "status": "success"})
 
         ext = ".jpg" if "jpeg" in content_type else ".png"
         user_dir = UPLOAD_DIR / str(user_id)
@@ -541,10 +514,12 @@ Provide:
                 logger.warning(f"Image-to-video fallback failed: {e}")
 
         if not video_bytes:
+            telemetry.media_generated.add(1, {"kind": "video", "source": "none", "status": "failed"})
             raise ValueError(
                 "Video generation is currently unavailable. For reliable video generation, "
                 "add REPLICATE_API_TOKEN to your environment (get one free at https://replicate.com)."
             )
+        telemetry.media_generated.add(1, {"kind": "video", "source": source or "unknown", "status": "success"})
 
         # Save video file
         user_dir = UPLOAD_DIR / str(user_id)
@@ -613,19 +588,7 @@ Provide:
             "required": ["title", "caption", "hashtags", "hook", "cta", "media_suggestion", "posting_tip"],
         }
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": response_schema,
-                },
-            )
-            return json.loads(response.text)
-        except Exception as e:
-            logger.error(f"Gemini content creation failed: {e}")
-            raise
+        return self._run_model("create_content", prompt, response_schema)
 
     async def modify_content(
         self, platform: str, original_content: str,
@@ -659,19 +622,7 @@ Provide:
             "required": ["modified_content", "hashtags", "changes_made", "engagement_score"],
         }
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": response_schema,
-                },
-            )
-            return json.loads(response.text)
-        except Exception as e:
-            logger.error(f"Gemini content modification failed: {e}")
-            raise
+        return self._run_model("modify_content", prompt, response_schema)
 
     def _get_content_types(self, platform: str) -> str:
         types = {

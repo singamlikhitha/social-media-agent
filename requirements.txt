@@ -19,3 +19,12 @@ python-jose[cryptography]>=3.3.0
 celery[redis]>=5.3.0
 redis>=5.0.0
 cryptography>=42.0.0
+
+# OpenTelemetry (traces + metrics + logs over OTLP)
+opentelemetry-sdk>=1.29.0
+opentelemetry-exporter-otlp>=1.29.0
+opentelemetry-instrumentation-fastapi>=0.50b0
+opentelemetry-instrumentation-sqlalchemy>=0.50b0
+opentelemetry-instrumentation-httpx>=0.50b0
+opentelemetry-instrumentation-celery>=0.50b0
+opentelemetry-instrumentation-redis>=0.50b0

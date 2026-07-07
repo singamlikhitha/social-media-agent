@@ -1,11 +1,13 @@
 import asyncio
 import base64
+import time
 import httpx
 from pathlib import Path
 from app.database import SessionLocal
 from app.models.post import ScheduledPost, PostStatus, Platform
 from app.config import settings
 from app.utils.logger import logger
+from app import telemetry
 
 UPLOAD_DIR = Path("uploads")
 
@@ -101,51 +103,71 @@ class PostingService:
 
     async def execute_post(self, post_id: int):
         db = SessionLocal()
-        try:
-            post = db.query(ScheduledPost).filter(ScheduledPost.id == post_id).first()
-            if not post:
-                logger.error(f"Post {post_id} not found")
-                return
-
-            if post.status == PostStatus.PUBLISHED:
-                logger.warning(f"Post {post_id} already published")
-                return
-
-            post.status = PostStatus.PUBLISHING
-            db.commit()
-
+        with telemetry.tracer.start_as_current_span("post.publish") as span:
+            span.set_attribute("post.id", post_id)
             try:
-                # Auto-resolve connected_account_id if not set
-                if not post.connected_account_id:
-                    self._auto_resolve_account(post, db)
+                post = db.query(ScheduledPost).filter(ScheduledPost.id == post_id).first()
+                if not post:
+                    logger.error(f"Post {post_id} not found")
+                    span.set_attribute("post.result", "not_found")
+                    return
 
-                if post.platform == Platform.INSTAGRAM:
-                    platform_id = await self._publish_to_instagram(post, db)
-                elif post.platform == Platform.YOUTUBE:
-                    platform_id = self._publish_to_youtube(post, db)
-                elif post.platform == Platform.FACEBOOK:
-                    platform_id = await self._publish_to_facebook(post, db)
-                elif post.platform == Platform.TWITTER:
-                    platform_id = await self._publish_to_twitter(post, db)
-                elif post.platform == Platform.LINKEDIN:
-                    platform_id = await self._publish_to_linkedin(post, db)
-                else:
-                    raise ValueError(f"Unsupported platform: {post.platform}")
+                if post.status == PostStatus.PUBLISHED:
+                    logger.warning(f"Post {post_id} already published")
+                    span.set_attribute("post.result", "already_published")
+                    return
 
-                post.platform_post_id = str(platform_id) if platform_id else None
-                post.status = PostStatus.PUBLISHED
-                post.error_message = None
-                logger.info(f"Post {post_id} published successfully: {platform_id}")
+                platform = post.platform.value if post.platform else "unknown"
+                span.set_attribute("post.platform", platform)
+                span.set_attribute("post.type", post.post_type or "")
 
-            except Exception as e:
-                post.status = PostStatus.FAILED
-                post.error_message = str(e)
-                logger.error(f"Post {post_id} publishing failed: {e}")
+                post.status = PostStatus.PUBLISHING
+                db.commit()
 
-            db.commit()
+                started = time.monotonic()
+                outcome = "success"
+                try:
+                    # Auto-resolve connected_account_id if not set
+                    if not post.connected_account_id:
+                        self._auto_resolve_account(post, db)
 
-        finally:
-            db.close()
+                    if post.platform == Platform.INSTAGRAM:
+                        platform_id = await self._publish_to_instagram(post, db)
+                    elif post.platform == Platform.YOUTUBE:
+                        platform_id = self._publish_to_youtube(post, db)
+                    elif post.platform == Platform.FACEBOOK:
+                        platform_id = await self._publish_to_facebook(post, db)
+                    elif post.platform == Platform.TWITTER:
+                        platform_id = await self._publish_to_twitter(post, db)
+                    elif post.platform == Platform.LINKEDIN:
+                        platform_id = await self._publish_to_linkedin(post, db)
+                    else:
+                        raise ValueError(f"Unsupported platform: {post.platform}")
+
+                    post.platform_post_id = str(platform_id) if platform_id else None
+                    post.status = PostStatus.PUBLISHED
+                    post.error_message = None
+                    span.set_attribute("post.platform_post_id", str(platform_id))
+                    logger.info(f"Post {post_id} published successfully: {platform_id}")
+
+                except Exception as e:
+                    outcome = "failed"
+                    post.status = PostStatus.FAILED
+                    post.error_message = str(e)
+                    span.record_exception(e)
+                    span.set_attribute("error", True)
+                    logger.error(f"Post {post_id} publishing failed: {e}")
+
+                duration_ms = (time.monotonic() - started) * 1000
+                attrs = {"platform": platform, "status": outcome}
+                telemetry.posts_published.add(1, attrs)
+                telemetry.post_publish_duration.record(duration_ms, attrs)
+                span.set_attribute("post.result", outcome)
+
+                db.commit()
+
+            finally:
+                db.close()
 
     def _auto_resolve_account(self, post: ScheduledPost, db):
         """Find the user's connected account for the post's platform."""

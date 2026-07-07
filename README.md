@@ -231,6 +231,62 @@ GOOGLE_REDIRECT_URI=http://localhost:8080/api/oauth/google/callback
 | `REDIS_URL` | For Celery | Redis connection URL |
 | `TOGETHER_API_KEY` | Optional | Together.ai API key for image generation |
 | `REPLICATE_API_TOKEN` | Optional | Replicate API key for video generation |
+| `LOG_FORMAT` | Optional | `text` (default) or `json` for structured logs |
+| `OTEL_ENABLED` | Optional | `true` to export OpenTelemetry traces/metrics/logs (default `false`) |
+| `OTEL_SERVICE_NAME` | Optional | Service name reported to the OTLP backend |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | For telemetry | OTLP collector endpoint (e.g. `http://localhost:4318`) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | Optional | `http/protobuf` (default) or `grpc` |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Optional | Comma-separated auth headers for the OTLP backend |
+
+---
+
+## Observability / Telemetry
+
+The backend and Celery worker are instrumented with **OpenTelemetry** and export
+**traces, metrics, and logs over OTLP** to any compatible collector (Grafana/Tempo,
+Jaeger, Honeycomb, Google Cloud, etc.). Telemetry is **off by default** and fully
+no-op unless `OTEL_ENABLED=true`, so local development is unaffected.
+
+### Enable it
+
+```env
+OTEL_ENABLED=true
+OTEL_SERVICE_NAME=social-media-backend
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # your collector
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf           # or grpc (port 4317)
+LOG_FORMAT=json                                      # structured, trace-correlated logs
+```
+
+Spin up a local collector to try it:
+
+```bash
+# Jaeger all-in-one (OTLP http on 4318, UI on 16686)
+docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/all-in-one:latest
+```
+
+### What's instrumented
+
+| Signal | Coverage |
+|--------|----------|
+| **Traces** | FastAPI requests, SQLAlchemy queries, outbound HTTPX calls (social + Gemini APIs), Redis, and Celery tasks — plus custom spans `post.publish` and `gemini.*` |
+| **Metrics** | HTTP server RED metrics (auto), plus business counters/histograms (see below) |
+| **Logs** | JSON logs with `trace_id`/`span_id` correlation; optionally shipped via OTLP (`OTEL_EXPORT_LOGS`) |
+
+### Business metrics
+
+| Metric | Type | Attributes |
+|--------|------|-----------|
+| `smm.posts.published` | counter | `platform`, `status` |
+| `smm.posts.publish.duration` | histogram (ms) | `platform`, `status` |
+| `smm.content.generated` | counter | `operation`, `platform` |
+| `smm.gemini.requests` | counter | `operation`, `model`, `status` |
+| `smm.gemini.duration` | histogram (ms) | `operation`, `model` |
+| `smm.media.generated` | counter | `kind`, `source`, `status` |
+| `smm.oauth.token_refresh` | counter | `platform`, `status` |
+
+In production, `deploy.yml` sets these via GitHub secrets/vars
+(`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`,
+`OTEL_EXPORTER_OTLP_PROTOCOL`) with `OTEL_ENABLED=true` and `LOG_FORMAT=json`.
 
 ---
 

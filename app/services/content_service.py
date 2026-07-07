@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.models.content import ContentIdea
 from app.services.gemini_service import gemini_service
 from app.utils.logger import logger
+from app import telemetry
 
 
 class ContentService:
@@ -32,6 +33,9 @@ class ContentService:
         for idea in ideas:
             db.refresh(idea)
 
+        telemetry.content_generated.add(
+            len(ideas), {"operation": "generate_ideas", "platform": platform}
+        )
         logger.info(f"Generated {len(ideas)} content ideas for {platform}/{niche}")
         return ideas
 
@@ -45,6 +49,9 @@ class ContentService:
             source_platform, target_platform, source_content
         )
 
+        telemetry.content_generated.add(
+            1, {"operation": "repurpose", "platform": target_platform}
+        )
         logger.info(f"Repurposed content from {source_platform} to {target_platform}")
         return {
             "source_platform": source_platform,
@@ -95,6 +102,9 @@ class ContentService:
         result = await gemini_service.create_content(
             platform=platform, topic=topic, content_type=content_type,
             tone=tone, language=language
+        )
+        telemetry.content_generated.add(
+            1, {"operation": "create_content", "platform": platform}
         )
         logger.info(f"Created content for {platform} on topic: {topic}")
         return result

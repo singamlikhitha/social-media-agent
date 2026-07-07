@@ -105,6 +105,11 @@ app.include_router(linkedin_oauth_router)
 app.include_router(oauth_accounts_router)
 app.include_router(oauth_accounts_flat_router)
 
+# Initialise OpenTelemetry (traces + metrics + logs). No-op unless OTEL_ENABLED=true.
+from app.telemetry import setup_telemetry
+
+setup_telemetry(app=app)
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

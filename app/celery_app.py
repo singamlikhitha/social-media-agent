@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.signals import worker_process_init
 from app.config import settings
 
 celery_app = Celery(
@@ -31,3 +32,16 @@ celery_app.conf.update(
         },
     },
 )
+
+
+@worker_process_init.connect(weak=False)
+def _init_worker_telemetry(*args, **kwargs):
+    """Initialise OpenTelemetry inside each Celery worker process.
+
+    Exporters use background threads, so they must be set up after the worker forks
+    (in worker_process_init), not at import time in the parent process.
+    """
+    from app.telemetry import setup_telemetry, instrument_celery
+
+    setup_telemetry()
+    instrument_celery()
