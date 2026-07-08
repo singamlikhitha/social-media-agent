@@ -101,8 +101,12 @@ def _parse_headers(raw: str) -> Optional[dict]:
     return headers or None
 
 
-def _build_exporters():
-    """Return (span_exporter, metric_exporter, log_exporter) for the configured protocol."""
+def _exporter_type() -> str:
+    return (settings.OTEL_EXPORTER_TYPE or "otlp").lower()
+
+
+def _otlp_exporters():
+    """Return (span, metric, log) OTLP exporters for the configured protocol."""
     protocol = (settings.OTEL_EXPORTER_OTLP_PROTOCOL or "http/protobuf").lower()
     endpoint = settings.OTEL_EXPORTER_OTLP_ENDPOINT or None
     headers = _parse_headers(settings.OTEL_EXPORTER_OTLP_HEADERS)
@@ -115,13 +119,8 @@ def _build_exporters():
         kwargs = {"headers": headers}
         if endpoint:
             kwargs["endpoint"] = endpoint
-        return (
-            OTLPSpanExporter(**kwargs),
-            OTLPMetricExporter(**kwargs),
-            OTLPLogExporter(**kwargs),
-        )
+        return OTLPSpanExporter(**kwargs), OTLPMetricExporter(**kwargs), OTLPLogExporter(**kwargs)
 
-    # Default: OTLP over HTTP/protobuf. Each signal has its own path suffix.
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
     from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
@@ -137,6 +136,31 @@ def _build_exporters():
         OTLPMetricExporter(**_http_kwargs("metrics")),
         OTLPLogExporter(**_http_kwargs("logs")),
     )
+
+
+def _span_exporter():
+    if _exporter_type() == "gcp":
+        # Push spans straight to Google Cloud Trace using ADC (Cloud Run SA).
+        from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+
+        return CloudTraceSpanExporter(project_id=settings.GOOGLE_CLOUD_PROJECT or None)
+    return _otlp_exporters()[0]
+
+
+def _metric_exporter():
+    if _exporter_type() == "gcp":
+        from opentelemetry.exporter.cloud_monitoring import CloudMonitoringMetricsExporter
+
+        return CloudMonitoringMetricsExporter(project_id=settings.GOOGLE_CLOUD_PROJECT or None)
+    return _otlp_exporters()[1]
+
+
+def _log_exporter():
+    # In gcp mode logs go to Cloud Logging via structured stdout (LOG_FORMAT=json),
+    # so there is no OTLP log exporter to build.
+    if _exporter_type() == "gcp":
+        return None
+    return _otlp_exporters()[2]
 
 
 def _build_resource():
@@ -212,30 +236,40 @@ def setup_telemetry(app=None, engine=None) -> bool:
         logger.info("Telemetry disabled (OTEL_ENABLED=false); skipping OpenTelemetry setup.")
         return False
 
+    resource = _build_resource()
+
+    # Each signal is set up independently so a failure in one exporter (e.g. a
+    # metrics permission gap) can't take down tracing or auto-instrumentation.
     try:
-        resource = _build_resource()
-        span_exporter, metric_exporter, log_exporter = _build_exporters()
+        _setup_tracing(resource, _span_exporter())
+    except Exception as exc:
+        logger.error("Trace exporter setup failed: %s", exc, exc_info=True)
 
-        _setup_tracing(resource, span_exporter)
-        _setup_metrics(resource, metric_exporter)
-        if settings.OTEL_EXPORT_LOGS:
-            _setup_logs(resource, log_exporter)
+    if settings.OTEL_EXPORT_METRICS:
+        try:
+            _setup_metrics(resource, _metric_exporter())
+        except Exception as exc:
+            logger.error("Metric exporter setup failed: %s", exc, exc_info=True)
 
-        _instrument_libraries(app=app, engine=engine)
+    if settings.OTEL_EXPORT_LOGS:
+        try:
+            log_exporter = _log_exporter()
+            if log_exporter is not None:
+                _setup_logs(resource, log_exporter)
+        except Exception as exc:
+            logger.error("Log exporter setup failed: %s", exc, exc_info=True)
 
-        _initialized = True
-        logger.info(
-            "OpenTelemetry initialised (service=%s, env=%s, protocol=%s, endpoint=%s)",
-            settings.OTEL_SERVICE_NAME,
-            settings.ENVIRONMENT,
-            settings.OTEL_EXPORTER_OTLP_PROTOCOL,
-            settings.OTEL_EXPORTER_OTLP_ENDPOINT or "<sdk-default>",
-        )
-        return True
-    except Exception as exc:  # never let telemetry break the app
-        logger.error("Failed to initialise OpenTelemetry: %s", exc, exc_info=True)
-        _initialized = True
-        return False
+    _instrument_libraries(app=app, engine=engine)
+
+    _initialized = True
+    logger.info(
+        "OpenTelemetry initialised (service=%s, env=%s, exporter=%s, endpoint=%s)",
+        settings.OTEL_SERVICE_NAME,
+        settings.ENVIRONMENT,
+        _exporter_type(),
+        settings.OTEL_EXPORTER_OTLP_ENDPOINT or "<gcp/sdk-default>",
+    )
+    return True
 
 
 def _instrument_libraries(app=None, engine=None):

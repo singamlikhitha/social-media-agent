@@ -65,14 +65,20 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"  # dev / staging / production — becomes deployment.environment
     OTEL_ENABLED: bool = False
     OTEL_SERVICE_NAME: str = "social-media-backend"
+    # Exporter backend: "otlp" (vendor-neutral collector) or "gcp" (Google Cloud
+    # Trace + Cloud Monitoring directly, via Application Default Credentials).
+    OTEL_EXPORTER_TYPE: str = "otlp"
+    # GCP project for the gcp exporter; blank = auto-detect from ADC / metadata server.
+    GOOGLE_CLOUD_PROJECT: str = ""
     # OTLP collector endpoint, e.g. "http://localhost:4318" (http) or "localhost:4317" (grpc).
-    # Leave blank to use the SDK default for the selected protocol.
+    # Leave blank to use the SDK default for the selected protocol. (otlp mode only)
     OTEL_EXPORTER_OTLP_ENDPOINT: str = ""
     OTEL_EXPORTER_OTLP_PROTOCOL: str = "http/protobuf"  # "http/protobuf" or "grpc"
     # Comma-separated header list, e.g. "authorization=Bearer xxx,x-tenant=abc"
     OTEL_EXPORTER_OTLP_HEADERS: str = ""
     OTEL_TRACES_SAMPLER_RATIO: float = 1.0  # 0.0–1.0 (parent-based ratio sampler)
-    OTEL_EXPORT_LOGS: bool = True  # also ship application logs via OTLP
+    OTEL_EXPORT_METRICS: bool = True  # export metrics (Cloud Monitoring in gcp mode)
+    OTEL_EXPORT_LOGS: bool = True  # ship logs via OTLP (ignored in gcp mode — uses stdout)
 
     # Plan Limits
     FREE_PLAN_MAX_ACCOUNTS: int = 2

@@ -249,13 +249,32 @@ no-op unless `OTEL_ENABLED=true`, so local development is unaffected.
 
 ### Enable it
 
+Two exporter backends are supported via `OTEL_EXPORTER_TYPE`:
+
+**A) Vendor-neutral OTLP collector** (`OTEL_EXPORTER_TYPE=otlp`, default):
+
 ```env
 OTEL_ENABLED=true
+OTEL_EXPORTER_TYPE=otlp
 OTEL_SERVICE_NAME=social-media-backend
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # your collector
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf           # or grpc (port 4317)
 LOG_FORMAT=json                                      # structured, trace-correlated logs
 ```
+
+**B) Google Cloud directly** (`OTEL_EXPORTER_TYPE=gcp`) — traces → Cloud Trace,
+metrics → Cloud Monitoring, via the runtime service account (Application Default
+Credentials). No collector needed. This is how the `zsecure` deployment runs.
+
+```env
+OTEL_ENABLED=true
+OTEL_EXPORTER_TYPE=gcp
+GOOGLE_CLOUD_PROJECT=zsecure        # blank = auto-detect on Cloud Run
+LOG_FORMAT=json                     # logs -> Cloud Logging (gcp mode skips OTLP logs)
+```
+
+> The Cloud Run service account needs `roles/cloudtrace.agent` and
+> `roles/monitoring.metricWriter`. Set `OTEL_EXPORT_METRICS=false` to send traces only.
 
 Spin up a local collector to try it:
 
