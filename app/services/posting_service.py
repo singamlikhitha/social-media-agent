@@ -154,8 +154,7 @@ class PostingService:
                     outcome = "failed"
                     post.status = PostStatus.FAILED
                     post.error_message = str(e)
-                    span.record_exception(e)
-                    span.set_attribute("error", True)
+                    telemetry.record_span_error(span, e)
                     logger.error(f"Post {post_id} publishing failed: {e}")
 
                 duration_ms = (time.monotonic() - started) * 1000

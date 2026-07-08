@@ -38,8 +38,7 @@ class GeminiService:
                 telemetry.gemini_requests.add(1, {**attrs, "status": "success"})
                 return json.loads(response.text)
             except Exception as e:
-                span.record_exception(e)
-                span.set_attribute("error", True)
+                telemetry.record_span_error(span, e)
                 telemetry.gemini_requests.add(1, {**attrs, "status": "error"})
                 logger.error(f"Gemini {operation} failed: {e}")
                 raise

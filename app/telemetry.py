@@ -17,6 +17,7 @@ import logging
 from typing import Optional
 
 from opentelemetry import metrics, trace
+from opentelemetry.trace import Status, StatusCode
 
 from app.config import settings
 
@@ -73,6 +74,18 @@ token_refreshes = meter.create_counter(
 logger = logging.getLogger("social_media_agent")
 
 _initialized = False
+
+
+def record_span_error(span, exc: Exception) -> None:
+    """Mark a span as failed: record the exception and set status to ERROR.
+
+    Without the explicit set_status, a failed span would still show as
+    'Unset' in trace UIs (Cloud Trace, Jaeger, ...) — only ERROR renders
+    it as a failure.
+    """
+    span.record_exception(exc)
+    span.set_status(Status(StatusCode.ERROR, str(exc)))
+    span.set_attribute("error", True)
 
 
 def _parse_headers(raw: str) -> Optional[dict]:
