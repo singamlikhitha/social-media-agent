@@ -1,19 +1,22 @@
 import json
+import uuid
 from sqlalchemy.orm import Session
 from app.models.content import ContentIdea
 from app.services.gemini_service import gemini_service
 from app.utils.logger import logger
+from app import telemetry
 
 
 class ContentService:
     async def generate_ideas(
-        self, platform: str, niche: str, count: int, db: Session
+        self, platform: str, niche: str, count: int, db: Session, user_id: uuid.UUID | None = None
     ) -> list[ContentIdea]:
         ideas_data = await gemini_service.generate_content_ideas(platform, niche, count)
 
         ideas = []
         for item in ideas_data:
             idea = ContentIdea(
+                user_id=user_id,
                 platform=platform,
                 topic=item["topic"],
                 content_type=item.get("content_type"),
@@ -30,6 +33,9 @@ class ContentService:
         for idea in ideas:
             db.refresh(idea)
 
+        telemetry.content_generated.add(
+            len(ideas), {"operation": "generate_ideas", "platform": platform}
+        )
         logger.info(f"Generated {len(ideas)} content ideas for {platform}/{niche}")
         return ideas
 
@@ -43,6 +49,9 @@ class ContentService:
             source_platform, target_platform, source_content
         )
 
+        telemetry.content_generated.add(
+            1, {"operation": "repurpose", "platform": target_platform}
+        )
         logger.info(f"Repurposed content from {source_platform} to {target_platform}")
         return {
             "source_platform": source_platform,
@@ -73,16 +82,41 @@ class ContentService:
         }
 
     def get_ideas(
-        self, db: Session, platform: str | None = None, unused_only: bool = False
+        self, db: Session, platform: str | None = None, unused_only: bool = False, user_id: uuid.UUID | None = None
     ) -> list[ContentIdea]:
         query = db.query(ContentIdea)
 
+        if user_id:
+            query = query.filter(ContentIdea.user_id == user_id)
         if platform:
             query = query.filter(ContentIdea.platform == platform)
         if unused_only:
             query = query.filter(ContentIdea.used == False)
 
         return query.order_by(ContentIdea.created_at.desc()).all()
+
+    async def create_content(
+        self, platform: str, topic: str, content_type: str = "post",
+        tone: str = "engaging", language: str = "English"
+    ) -> dict:
+        result = await gemini_service.create_content(
+            platform=platform, topic=topic, content_type=content_type,
+            tone=tone, language=language
+        )
+        telemetry.content_generated.add(
+            1, {"operation": "create_content", "platform": platform}
+        )
+        logger.info(f"Created content for {platform} on topic: {topic}")
+        return result
+
+    async def modify_content(
+        self, platform: str, original_content: str, instruction: str = "improve engagement"
+    ) -> dict:
+        result = await gemini_service.modify_content(
+            platform=platform, original_content=original_content, instruction=instruction
+        )
+        logger.info(f"Modified content for {platform}")
+        return result
 
     def mark_idea_used(self, db: Session, idea_id: int) -> ContentIdea | None:
         idea = db.query(ContentIdea).filter(ContentIdea.id == idea_id).first()

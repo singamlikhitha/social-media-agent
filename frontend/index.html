@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Social Media Agent</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          <span>Social Media Agent</span>
+        </div>
+      </div>
+      <button class="new-chat-btn" onclick="newSession()">+ New Chat</button>
+      <div class="quick-actions">
+        <h4>Quick Actions</h4>
+        <button onclick="sendQuick('Generate 3 Instagram content ideas about technology')">Content Ideas</button>
+        <button onclick="sendQuick('What are the trending topics in fitness right now?')">Trending Topics</button>
+        <button onclick="sendQuick('Suggest 15 hashtags for a post about healthy living')">Hashtag Suggestions</button>
+        <button onclick="sendQuick('When is the best time to post on Instagram?')">Best Post Time</button>
+        <button onclick="sendQuick('Show me all my scheduled posts')">My Posts</button>
+      </div>
+    </aside>
+
+    <!-- Main Chat -->
+    <main class="chat-area">
+      <div class="chat-header">
+        <h2>Social Media Content Strategist</h2>
+        <p>AI-powered content creation, scheduling & optimization</p>
+      </div>
+
+      <div class="messages" id="messages">
+        <div class="welcome-message">
+          <div class="welcome-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+              <line x1="9" y1="9" x2="9.01" y2="9"/>
+              <line x1="15" y1="9" x2="15.01" y2="9"/>
+            </svg>
+          </div>
+          <h3>Hey! I'm your Social Media Agent</h3>
+          <p>I can help you create content, schedule posts, suggest hashtags, and maximize your reach on Instagram & YouTube.</p>
+          <div class="welcome-chips">
+            <button onclick="sendQuick('Generate 3 Instagram content ideas about travel')">Generate Content Ideas</button>
+            <button onclick="sendQuick('Optimize this caption: Just had an amazing day at the beach!')">Optimize a Caption</button>
+            <button onclick="sendQuick('Schedule a post on Instagram with image https://example.com/photo.jpg about food')">Schedule a Post</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="input-area">
+        <div id="filePreview" class="file-preview" style="display:none;"></div>
+        <div class="input-wrapper">
+          <input type="file" id="fileInput" accept="image/*,video/mp4,video/quicktime" onchange="handleFileSelect(event)" style="display:none;" />
+          <button class="upload-btn" onclick="triggerFileUpload()" title="Upload photo or video">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+          </button>
+          <textarea
+            id="userInput"
+            placeholder="Ask me to generate ideas, schedule posts, or upload a photo..."
+            rows="1"
+            onkeydown="handleKeyDown(event)"
+          ></textarea>
+          <button class="send-btn" onclick="sendMessage()" id="sendBtn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN adduser --disabled-password --gecos "" appuser
+
+# Install dependencies
+COPY requirements.adk.txt .
+RUN pip install --no-cache-dir -r requirements.adk.txt
+
+# Copy agent code into ADK-expected folder structure
+COPY --chown=appuser:appuser social_media_adk/ /app/social_media_adk/
+COPY --chown=appuser:appuser frontend/ /app/frontend/
+COPY --chown=appuser:appuser server.py /app/server.py
+
+# Remove .env from container (API key passed via env var)
+RUN rm -f /app/social_media_adk/.env
+
+USER appuser
+
+ENV GOOGLE_GENAI_USE_VERTEXAI=FALSE
+
+EXPOSE 8080
+
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 from pydantic import BaseModel
 from app.models.post import Platform, PostStatus
@@ -10,6 +11,7 @@ class PostCreate(BaseModel):
     media_urls: list[str] | None = None
     hashtags: list[str] | None = None
     scheduled_time: datetime
+    connected_account_id: int | None = None
     metadata: dict | None = None
 
 
@@ -23,6 +25,7 @@ class PostUpdate(BaseModel):
 
 class PostResponse(BaseModel):
     id: int
+    user_id: uuid.UUID
     platform: Platform
     post_type: str | None
     content_text: str | None

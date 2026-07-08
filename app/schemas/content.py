@@ -59,3 +59,66 @@ class HashtagRequest(BaseModel):
 class HashtagResponse(BaseModel):
     hashtags: list[str]
     reasoning: str
+
+
+class GenerateImageRequest(BaseModel):
+    prompt: str
+    style: str | None = None
+
+
+class GenerateImageResponse(BaseModel):
+    url: str
+    filename: str
+    size: int
+    content_type: str
+    prompt: str
+    style: str | None
+    description: str | None
+
+
+class GenerateVideoRequest(BaseModel):
+    prompt: str
+    style: str | None = None
+    duration: int = 5  # seconds
+
+
+class GenerateVideoResponse(BaseModel):
+    url: str
+    filename: str
+    size: int
+    content_type: str
+    prompt: str
+    style: str | None
+    duration: int
+    description: str | None
+
+
+class CreateContentRequest(BaseModel):
+    platform: Platform
+    topic: str
+    content_type: str = "post"
+    tone: str = "engaging"
+    language: str = "English"
+
+
+class CreateContentResponse(BaseModel):
+    title: str
+    caption: str
+    hashtags: list[str]
+    hook: str
+    cta: str
+    media_suggestion: str
+    posting_tip: str
+
+
+class ModifyContentRequest(BaseModel):
+    platform: Platform
+    original_content: str
+    instruction: str = "improve engagement"
+
+
+class ModifyContentResponse(BaseModel):
+    modified_content: str
+    hashtags: list[str]
+    changes_made: list[str]
+    engagement_score: float

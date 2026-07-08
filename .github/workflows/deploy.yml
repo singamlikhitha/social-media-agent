@@ -1,0 +1,102 @@
+
+name: Deploy to GCP
+
+on:
+  push:
+    branches: [main]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pip install pytest pytest-asyncio httpx
+      - run: pytest tests/ -v
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          JWT_SECRET: test-secret
+          GEMINI_API_KEY: test-key
+
+  deploy-backend:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build and deploy backend
+        run: |
+          gcloud builds submit --tag gcr.io/$PROJECT_ID/social-media-backend
+          gcloud run deploy social-media-backend \
+            --image gcr.io/$PROJECT_ID/social-media-backend \
+            --region $REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --set-env-vars "^##^DATABASE_URL=${{ secrets.DATABASE_URL }}##LOG_FORMAT=json##ENVIRONMENT=production##OTEL_ENABLED=true##OTEL_SERVICE_NAME=social-media-backend##OTEL_EXPORTER_OTLP_ENDPOINT=${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}##OTEL_EXPORTER_OTLP_PROTOCOL=${{ vars.OTEL_EXPORTER_OTLP_PROTOCOL || 'http/protobuf' }}##OTEL_EXPORTER_OTLP_HEADERS=${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}" \
+            --min-instances 1 \
+            --max-instances 20
+
+  deploy-worker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build and deploy worker
+        run: |
+          gcloud builds submit --tag gcr.io/$PROJECT_ID/social-media-worker -f Dockerfile.worker
+          gcloud run deploy social-media-worker \
+            --image gcr.io/$PROJECT_ID/social-media-worker \
+            --region $REGION \
+            --platform managed \
+            --no-allow-unauthenticated \
+            --set-env-vars "^##^DATABASE_URL=${{ secrets.DATABASE_URL }}##LOG_FORMAT=json##ENVIRONMENT=production##OTEL_ENABLED=true##OTEL_SERVICE_NAME=social-media-worker##OTEL_EXPORTER_OTLP_ENDPOINT=${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}##OTEL_EXPORTER_OTLP_PROTOCOL=${{ vars.OTEL_EXPORTER_OTLP_PROTOCOL || 'http/protobuf' }}##OTEL_EXPORTER_OTLP_HEADERS=${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}" \
+            --min-instances 1 \
+            --max-instances 5
+
+  deploy-frontend:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build and deploy frontend
+        run: |
+          gcloud builds submit --tag gcr.io/$PROJECT_ID/social-media-frontend -f Dockerfile.frontend
+          gcloud run deploy social-media-frontend \
+            --image gcr.io/$PROJECT_ID/social-media-frontend \
+            --region $REGION \
+            --platform managed \
+            --allow-unauthenticated \
+            --min-instances 1 \
+            --max-instances 10

@@ -1,11 +1,7 @@
-import os
-import json
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from app.config import settings
 from app.utils.logger import logger
 
 SCOPES = [
@@ -16,37 +12,30 @@ SCOPES = [
 
 
 class YouTubeService:
-    def __init__(self):
+    def __init__(self, credentials: dict | None = None):
         self._service = None
-
-    def _check_configured(self):
-        if not settings.youtube_configured:
-            raise RuntimeError(
-                "YouTube is not configured. Run the setup wizard: python -m setup_wizard.wizard"
-            )
+        self._credentials = credentials
 
     def _get_service(self):
         if self._service:
             return self._service
 
-        self._check_configured()
+        if not self._credentials:
+            raise RuntimeError(
+                "YouTube credentials not provided. Connect your YouTube account via OAuth."
+            )
 
-        creds = None
-        token_file = settings.YOUTUBE_OAUTH_TOKEN_FILE
+        creds = Credentials(
+            token=self._credentials.get("access_token"),
+            refresh_token=self._credentials.get("refresh_token"),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=self._credentials.get("client_id"),
+            client_secret=self._credentials.get("client_secret"),
+            scopes=SCOPES,
+        )
 
-        if os.path.exists(token_file):
-            creds = Credentials.from_authorized_user_file(token_file, SCOPES)
-
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-                with open(token_file, "w") as f:
-                    f.write(creds.to_json())
-            else:
-                raise RuntimeError(
-                    "YouTube OAuth token not found or invalid. "
-                    "Run the setup wizard: python -m setup_wizard.wizard"
-                )
+        if not creds.valid and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
 
         self._service = build("youtube", "v3", credentials=creds)
         return self._service
@@ -187,6 +176,3 @@ class YouTubeService:
             )
 
         return videos
-
-
-youtube_service = YouTubeService()

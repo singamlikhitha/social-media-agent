@@ -1,21 +1,20 @@
 import asyncio
 import httpx
-from app.config import settings
 from app.utils.logger import logger
 
 GRAPH_API_BASE = "https://graph.facebook.com/v21.0"
 
 
 class InstagramService:
-    def __init__(self):
-        self.access_token = settings.INSTAGRAM_ACCESS_TOKEN
-        self.account_id = settings.INSTAGRAM_BUSINESS_ACCOUNT_ID
+    def __init__(self, access_token: str | None = None, account_id: str | None = None):
+        self.access_token = access_token
+        self.account_id = account_id
         self.base_url = GRAPH_API_BASE
 
     def _check_configured(self):
-        if not settings.instagram_configured:
+        if not self.access_token or not self.account_id:
             raise RuntimeError(
-                "Instagram is not configured. Run the setup wizard: python -m setup_wizard.wizard"
+                "Instagram credentials not provided. Connect your Instagram account via OAuth."
             )
 
     async def create_media_container(
@@ -197,6 +196,3 @@ class InstagramService:
             raise RuntimeError(f"Instagram rate limit exceeded: {message}")
 
         raise RuntimeError(f"Instagram API error ({code}): {message}")
-
-
-instagram_service = InstagramService()
